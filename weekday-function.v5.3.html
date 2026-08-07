@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>最速曜日カウンタ</title>
+<style>
+* { box-sizing: border-box; font-family: sans-serif; }
+body { 
+padding: 5px 10px; 
+background: #7ca38a; 
+color: #222; 
+max-width: 500px; 
+margin: 0 auto; 
+overflow-x: hidden; 
+}
+.main-title {
+font-size: 14px; 
+font-weight: bold;
+color: #fff;
+text-align: center;
+margin: 2px 0 5px 0; 
+text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+}
+h3 { margin: 4px 0 2px 0; font-size: 12px; color: #fff; font-weight: 600; } 
+.grid { display: grid; gap: 4px; margin-bottom: 4px; } 
+.grid-year { grid-template-columns: repeat(5, 1fr); }
+.grid-month { grid-template-columns: repeat(6, 1fr); }
+.grid-day { grid-template-columns: repeat(7, 1fr); }
+.card {
+background: #eef7f2; 
+border: 1px solid #bddecb; 
+border-radius: 5px;
+padding: 2px 0; 
+line-height: 1; 
+text-align: center; 
+font-size: 12px; 
+font-weight: bold;
+color: #222; 
+cursor: pointer; 
+user-select: none; 
+white-space: nowrap; 
+-webkit-tap-highlight-color: transparent;
+}
+.card.sun { background: #ffd6d6; border-color: #fca4a4; color: #222 !important; }
+.card.sat { background: #d6ebff; border-color: #a4d3ff; color: #222 !important; }
+.card.selected { background: #007bff !important; color: #fff !important; border-color: #0056b3 !important; }
+
+.calendar-header {
+display: grid;
+grid-template-columns: repeat(7, 1fr);
+gap: 4px;
+text-align: center;
+font-size: 11px;
+font-weight: bold;
+color: #fff;
+margin-bottom: 1px;
+}
+.sun { color: #ffcccc; }
+.sat { color: #ccffff; }
+.empty-day { visibility: hidden; }
+.history-header-wrap {
+display: flex;
+justify-content: space-between;
+align-items: flex-end;
+margin: 8px 0 3px 0; 
+}
+.history-header-wrap h3 { 
+margin: 0; 
+font-size: 12px; 
+line-height: 1.2;
+}
+.history-sub-text {
+font-size: 10px;
+font-weight: normal;
+color: #eee;
+display: block;
+margin-top: 1px;
+}
+.btn-refresh-icon {
+font-size: 20px;
+color: #fff;
+cursor: pointer;
+user-select: none;
+line-height: 1;
+padding: 0 5px;
+-webkit-tap-highlight-color: transparent;
+transition: transform 0.1s;
+}
+.btn-refresh-icon:active { transform: scale(1.2); filter: brightness(1.3); }
+.history-container {
+background: #fff;
+border: 1px solid #ccc;
+border-radius: 5px;
+min-height: 100px;
+max-height: 280px; 
+overflow-y: auto;
+padding: 2px 0;
+}
+.history-item {
+display: flex;
+align-items: center;
+padding: 3px 10px; 
+font-size: 13px; 
+border-bottom: 1px dashed #eee;
+background: #fff;
+cursor: pointer;
+user-select: none;
+-webkit-tap-highlight-color: transparent;
+}
+.history-item:last-child { border-bottom: none; }
+.history-num {
+font-size: 11px;
+color: #999;
+width: 20px;
+display: inline-block;
+text-align: left;
+user-select: none;
+}
+.history-text { color: #333; font-weight: bold; }
+
+.drop-effect {
+position: fixed;
+background: linear-gradient(to bottom, rgba(200,200,200,0) 0%, rgba(160,160,160,0.4) 60%, rgba(110,110,110,0.7) 100%);
+width: 35px;
+height: 80px; 
+border-radius: 4px;
+z-index: 9999;
+pointer-events: none;
+transform-origin: top center;
+animation: slideDown 0.55s cubic-bezier(0.25, 1, 0.5, 1) forwards; 
+}
+@keyframes slideDown {
+0% { transform: translateY(0); opacity: 1; }
+100% { transform: translateY(var(--drop-distance)); opacity: 0; }
+}
+.bounce-in { animation: candyBounce 0.4s ease-out forwards; }
+@keyframes candyBounce {
+0% { transform: translateY(-10px); }
+30% { transform: translateY(0); }
+50% { transform: translateY(-4px); }
+70% { transform: translateY(0); }
+85% { transform: translateY(-1.5px); }
+100% { transform: translateY(0); }
+}
+</style>
+</head>
+<body>
+
+<div class="main-title">[日付から曜日を求めます]</div>
+
+<h3>年</h3>
+<div class="grid grid-year" id="year-grid"></div>
+
+<h3>月</h3>
+<div class="grid grid-month" id="month-grid"></div>
+
+<h3>日</h3>
+<div class="calendar-header">
+<span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span>
+</div>
+<div class="grid grid-day" id="day-grid"></div>
+
+<div class="history-header-wrap">
+<h3>蓄積エリア<span class="history-sub-text">（Wタップで個別削除。↺で全クリヤー。）</span></h3>
+<div class="btn-refresh-icon" onclick="resetAll()">↺</div>
+</div>
+<div class="history-container" id="storage"></div>
+
+<script>
+const todayObj = new Date();
+let selectedYear = todayObj.getFullYear();
+let selectedMonth = todayObj.getMonth() + 1;
+let selectedDay = null;
+let storageList = [];
+
+const weekDays = ["日", "月", "火", "水", "木", "金", "土"];
+
+window.onload = function() {
+initYears();
+initMonths();
+renderCalendar();
+};
+
+function initYears() {
+const grid = document.getElementById('year-grid');
+for (let y = 2019; y <= 2028; y++) {
+const div = document.createElement('div');
+div.className = 'card';
+div.innerText = y;
+div.id = `year-${y}`;
+if (y === selectedYear) div.classList.add('selected');
+div.onclick = () => selectYear(y);
+grid.appendChild(div);
+}
+}
+
+function initMonths() {
+const grid = document.getElementById('month-grid');
+for (let m = 1; m <= 12; m++) {
+const div = document.createElement('div');
+div.className = 'card';
+div.innerText = m;
+div.id = `month-${m}`;
+if (m === selectedMonth) div.classList.add('selected');
+div.onclick = () => selectMonth(m);
+grid.appendChild(div);
+}
+}
+
+function selectYear(y) {
+const prevBtn = document.getElementById(`year-${selectedYear}`);
+if (prevBtn) prevBtn.classList.remove('selected');
+selectedYear = y;
+const newBtn = document.getElementById(`year-${y}`);
+if (newBtn) newBtn.classList.add('selected');
+// カレンダー動的変化のタイミングで、前回の「日」の選択を確実に消去
+selectedDay = null;
+renderCalendar();
+}
+
+function selectMonth(m) {
+const prevBtn = document.getElementById(`month-${selectedMonth}`);
+if (prevBtn) prevBtn.classList.remove('selected');
+selectedMonth = m;
+const newBtn = document.getElementById(`month-${m}`);
+if (newBtn) newBtn.classList.add('selected');
+// カレンダー動的変化のタイミングで、前回の「日」の選択を確実に消去
+selectedDay = null;
+renderCalendar();
+}
+
+function isHoliday(year, month, day) {
+const date = new Date(year, month - 1, day);
+const y = year;
+const m = month;
+const d = day;
+const w = date.getDay();
+
+if (m === 1 && d === 1) return true;
+if (m === 2 && d === 11) return true;
+if (m === 2 && d === 23) return true;
+if (m === 4 && d === 29) return true;
+if (m === 5 && d === 3) return true;
+if (m === 5 && d === 4) return true;
+if (m === 5 && d === 5) return true;
+if (m === 8 && d === 11) return true;
+if (m === 11 && d === 3) return true;
+if (m === 11 && d === 23) return true;
+
+if (m === 1 && w === 1 && d >= 8 && d <= 14) return true;
+if (m === 7 && w === 1 && d >= 15 && d <= 21) return true;
+if (m === 9 && w === 1 && d >= 15 && d <= 21) return true;
+if (m === 10 && w === 1 && d >= 8 && d <= 14) return true;
+
+if (m === 3) {
+if ((y <= 2023 && d === 21) || (y >= 2024 && d === 20)) return true;
+}
+if (m === 9) {
+if ((y % 4 === 0 && d === 22) || (y % 4 !== 0 && d === 23)) return true;
+}
+
+if (d > 1) {
+if (new Date(y, m - 1, d - 1).getDay() === 0 && isHoliday(y, m, d - 1)) return true;
+} else if (d === 1) {
+const prevMonthLast = new Date(y, m - 1, 0);
+if (prevMonthLast.getDay() === 0 && isHoliday(y, m - 1, prevMonthLast.getDate())) return true;
+}
+if (m === 5 && d === 6 && (w === 1 || w === 2 || w === 3)) return true;
+
+return false;
+}
+
+function renderCalendar() {
+const grid = document.getElementById('day-grid');
+grid.innerHTML = '';
+
+const firstDayOfWeek = new Date(selectedYear, selectedMonth - 1, 1).getDay();
+const totalDays = new Date(selectedYear, selectedMonth, 0).getDate();
+
+for (let i = 0; i < firstDayOfWeek; i++) {
+const empty = document.createElement('div');
+empty.className = 'empty-day';
+grid.appendChild(empty);
+}
+
+for (let d = 1; d <= totalDays; d++) {
+const div = document.createElement('div');
+div.className = 'card';
+div.innerText = d;
+div.id = `day-${d}`;
+
+const currentW = new Date(selectedYear, selectedMonth - 1, d).getDay();
+if (currentW === 0 || isHoliday(selectedYear, selectedMonth, d)) {
+div.classList.add('sun');
+} else if (currentW === 6) {
+div.classList.add('sat');
+}
+
+if (d === selectedDay) div.classList.add('selected');
+div.onclick = (e) => triggerAccumulate(d, e.target);
+grid.appendChild(div);
+}
+}
+
+function triggerAccumulate(d, element) {
+if (selectedDay) {
+const prevBtn = document.getElementById(`day-${selectedDay}`);
+if (prevBtn) prevBtn.classList.remove('selected');
+}
+selectedDay = d;
+element.classList.add('selected');
+
+const rect = element.getBoundingClientRect();
+const windowHeight = window.innerHeight;
+
+const effect = document.createElement('div');
+effect.className = 'drop-effect';
+
+effect.style.left = `${rect.left + (rect.width / 2) - 17.5}px`;
+effect.style.top = `${rect.top}px`;
+
+const dropDistance = windowHeight - rect.top + 100;
+effect.style.setProperty('--drop-distance', `${dropDistance}px`);
+
+document.body.appendChild(effect);
+
+setTimeout(() => {
+addStorage();
+}, 200);
+
+effect.addEventListener('animationend', () => {
+effect.remove();
+});
+}
+
+function addStorage() {
+const date = new Date(selectedYear, selectedMonth - 1, selectedDay);
+const dayText = weekDays[date.getDay()];
+const dateString = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(selectedDay).padStart(2, '0')}-(${dayText})`;
+
+storageList.push(dateString);
+renderStorage();
+}
+
+function renderStorage() {
+const container = document.getElementById('storage');
+container.innerHTML = '';
+
+storageList.forEach((item, index) => {
+const div = document.createElement('div');
+div.className = 'history-item';
+
+if (index === storageList.length - 1) {
+div.classList.add('bounce-in');
+}
+
+const numSpan = document.createElement('span');
+numSpan.className = 'history-num';
+numSpan.innerText = index + 1;
+
+const textSpan = document.createElement('span');
+textSpan.className = 'history-text';
+textSpan.innerText = item;
+
+div.appendChild(numSpan);
+div.appendChild(textSpan);
+
+div.ondblclick = () => {
+removeStorage(index);
+};
+
+container.appendChild(div);
+});
+
+container.scrollTop = container.scrollHeight;
+}
+
+function removeStorage(index) {
+const targetText = storageList[index];
+if (confirm(`${index + 1}番の「${targetText}」を削除しますか？`)) {
+storageList.splice(index, 1);
+renderStorage();
+}
+}
+
+function resetAll() {
+if (storageList.length > 0 && !confirm("蓄積エリアをクリヤしますか？")) {
+return;
+}
+
+storageList = [];
+renderStorage();
+selectedDay = null;
+
+const resetToday = new Date();
+const prevYearBtn = document.getElementById(`year-${selectedYear}`);
+if (prevYearBtn) prevYearBtn.classList.remove('selected');
+selectedYear = resetToday.getFullYear();
+const newYearBtn = document.getElementById(`year-${selectedYear}`);
+if (newYearBtn) newYearBtn.classList.add('selected');
+
+const prevMonthBtn = document.getElementById(`month-${selectedMonth}`);
+if (prevMonthBtn) prevMonthBtn.classList.remove('selected');
+selectedMonth = resetToday.getMonth() + 1;
+const newMonthBtn = document.getElementById(`month-${selectedMonth}`);
+if (newMonthBtn) newMonthBtn.classList.add('selected');
+
+renderCalendar();
+}
+</script>
+</body>
+</html>
